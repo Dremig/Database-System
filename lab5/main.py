@@ -13,7 +13,8 @@ class LibraryManagementSystem:
             'host': 'localhost',
             'user': 'user',
             'password': 'password',
-            'database': 'librarydb'
+            'database': 'librarydb',
+            'buffered': True
         }
         self.is_logged_in = False
         self.create_login_window()
@@ -439,16 +440,12 @@ class LibraryManagementSystem:
 
 
 # =============================== handle the logic of add books into the database =======================================
-
-
     def show_book_entry_window(self):
         self.clear_window()
         
-        # 主容器
         main_frame = tk.Frame(self.root)
         main_frame.pack(padx=20, pady=20, fill="both", expand=True)
 
-        # 标题
         tk.Label(main_frame, text="图书入库管理", font=("Arial", 16)).grid(row=0, column=0, columnspan=4, pady=10)
 
 
@@ -554,6 +551,10 @@ class LibraryManagementSystem:
         
         data = {}
         errors = []
+
+        all_book_no = []
+        all_book_names = []
+        
         
         for field, label in required_fields.items():
             value = self.entries[field].get().strip()
@@ -572,6 +573,19 @@ class LibraryManagementSystem:
         except ValueError as e:
             messagebox.showerror("格式错误", f"数值字段输入无效：{str(e)}")
             return
+        
+        if data["year"] < 1800 or data["year"] > 2025:
+            messagebox.showerror("年份错误", "年份必须在1800到2025之间")
+            return
+        elif data["price"] <= 0 :
+            messagebox.showerror("价格错误", "价格不得低于或等于0")
+            return
+        elif data["quantity"] <= 0:
+            messagebox.showerror("数量错误", "数量不得低于或等于0")
+            return
+        
+
+    
 
         conn = self.get_db_connection()
         if conn:
@@ -579,11 +593,18 @@ class LibraryManagementSystem:
                 cursor = conn.cursor()
                 
                 cursor.execute("SELECT * FROM Books WHERE BookNo = %s", (data["book_no"],))
-                existing_book = cursor.fetchone()
-                
-                if existing_book:
+                existing_book_no = cursor.fetchone()
+                cursor.execute("SELECT * FROM Books WHERE BookName = %s", (data["book_name"],))
+                existing_book_name = cursor.fetchone()
+
+                if existing_book_no and existing_book_name:
+                    if not data["book_name"] == existing_book_no[1] and data["book_no"] == existing_book_name[0]:
+                        messagebox.showerror("错误", "书号与书名应一一对应")
+                        return
+
+                if existing_book_no and existing_book_name:                     
                     # refresh the number
-                    new_storage = existing_book[7] + data["quantity"]
+                    new_storage = existing_book_no[6] + data["quantity"]
                     cursor.execute("UPDATE Books SET Storage = %s WHERE BookNo = %s", 
                                 (new_storage, data["book_no"]))
                 else:
@@ -684,6 +705,15 @@ class LibraryManagementSystem:
                         )
                         conn.rollback()
                         return
+                    if data["year"] < 1800 or data["year"] > 2025:
+                        messagebox.showerror("年份错误", "年份必须在1800到2025之间")
+                        return
+                    elif data["price"] <= 0 :
+                        messagebox.showerror("价格错误", "价格不得低于或等于0")
+                        return
+                    elif data["quantity"] <= 0:
+                        messagebox.showerror("数量错误", "数量不得低于或等于0")
+                        return 
 
                     cursor.execute("SELECT Storage FROM Books WHERE BookNo = %s", (data["book_no"],))
                     result = cursor.fetchone()
