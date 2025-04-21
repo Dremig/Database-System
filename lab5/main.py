@@ -256,6 +256,8 @@ class LibraryManagementSystem:
                         cursor.execute("UPDATE Books SET Storage = Storage - 1 WHERE BookNo = %s", (book_no,))
                         conn.commit()
                         messagebox.showinfo("成功", "借书成功")
+                    elif not result:
+                        messagebox.showerror("错误","未找到该书号的图书")
                     else:
                         messagebox.showerror("错误", "图书无库存")
                     cursor.close()
@@ -624,7 +626,12 @@ class LibraryManagementSystem:
                 self.clear_entries()
                 
             except mysql.connector.Error as err:
-                messagebox.showerror("数据库错误", f"操作失败: {err}")
+                if "Duplicate entry" in str(err):
+                    messagebox.showerror("错误","书名与书号应一一对应")
+                else:
+                    messagebox.showerror("数据库错误", f"操作失败: {err}")
+                return 
+
             finally:
                 cursor.close()
                 conn.close()
@@ -673,7 +680,6 @@ class LibraryManagementSystem:
                         data["category"] = arr[2]
                         data["author"] = arr[3]
                         data["publisher"] = arr[4]
-                        
                         data["year"] = int(arr[5])
                         data["price"] = float(arr[6])
                         data["quantity"] = int(arr[7])
@@ -681,7 +687,6 @@ class LibraryManagementSystem:
                         messagebox.showerror(
                             "数据错误",
                             f"第{line_num}行数据格式错误：\n"
-                            f"错误字段：{arr[e.args[0]] if e.args else '未知'}\n"
                             f"行内容：{line}\n"
                             f"详细错误：{str(e)}"
                         )
@@ -695,7 +700,7 @@ class LibraryManagementSystem:
                         "author": "作者",
                         "publisher": "出版社"
                     }
-                    missing = [v for k,v in required_fields.items() if not data[k]]
+                    missing = [v for k, v in required_fields.items() if not data[k]]
                     if missing:
                         messagebox.showerror(
                             "数据错误",
@@ -705,49 +710,78 @@ class LibraryManagementSystem:
                         )
                         conn.rollback()
                         return
+
                     if data["year"] < 1800 or data["year"] > 2025:
-                        messagebox.showerror("年份错误", "年份必须在1800到2025之间")
+                        messagebox.showerror("年份错误", f"第{line_num}行的年份必须在1800到2025之间")
+                        conn.rollback()
                         return
-                    elif data["price"] <= 0 :
-                        messagebox.showerror("价格错误", "价格不得低于或等于0")
+                    elif data["price"] <= 0:
+                        messagebox.showerror("价格错误", f"第{line_num}行的价格不得低于或等于0")
+                        conn.rollback()
                         return
                     elif data["quantity"] <= 0:
-                        messagebox.showerror("数量错误", "数量不得低于或等于0")
-                        return 
+                        messagebox.showerror("数量错误", f"第{line_num}行的数量不得低于或等于0")
+                        conn.rollback()
+                        return
 
-                    cursor.execute("SELECT Storage FROM Books WHERE BookNo = %s", (data["book_no"],))
-                    result = cursor.fetchone()
+                    try:
+                        cursor.execute("SELECT * FROM Books WHERE BookNo = %s", (data["book_no"],))
+                        existing_book_no = cursor.fetchone()
+                        cursor.execute("SELECT * FROM Books WHERE BookName = %s", (data["book_name"],))
+                        existing_book_name = cursor.fetchone()
 
-                    if result:
-                        new_storage = result[0] + data["quantity"]
-                        cursor.execute(
-                            "UPDATE Books SET Storage = %s WHERE BookNo = %s",
-                            (new_storage, data["book_no"])
+                        if (existing_book_no and existing_book_no[1] != data["book_name"]) or (existing_book_name and existing_book_name[0] != data["book_no"]):
+                            messagebox.showerror(
+                                "错误",
+                                "书号与书名应一一对应"
+                            )
+                            conn.rollback()
+                            return
+
+                        if existing_book_no:
+                            new_storage = existing_book_no[7] + data["quantity"]  
+                            cursor.execute(
+                                "UPDATE Books SET Storage = %s WHERE BookNo = %s",
+                                (new_storage, data["book_no"])
+                            )
+                        else:
+                            cursor.execute(
+                                """INSERT INTO Books 
+                                (BookNo, BookName, BookType, Author, Publisher, Year, Price, Storage)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                                (
+                                    data["book_no"], data["book_name"], data["category"],
+                                    data["author"], data["publisher"], data["year"],
+                                    data["price"], data["quantity"]
+                                )
+                            )
+                        conn.commit()
+                        success_count += 1
+
+                    except mysql.connector.Error as err:
+                        conn.rollback()
+                        if "Duplicate entry" in str(err):
+                            messagebox.showerror(
+                                "错误",
+                                f"第{line_num}行：书号或书名已存在且不匹配\n错误详情：{err}"
+                            )
+                        else:
+                            messagebox.showerror(
+                                "数据库错误",
+                                f"第{line_num}行操作失败: {err}"
+                            )
+                        return
+                    except Exception as e:
+                        conn.rollback()
+                        messagebox.showerror(
+                            "意外错误",
+                            f"第{line_num}行处理时发生错误: {str(e)}"
                         )
-                    else:
+                        return
 
-                        cursor.execute("""
-                            INSERT INTO Books 
-                            (BookNo, BookName, BookType, Author, Publisher, Year, Price, Storage)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            data["book_no"], 
-                            data["book_name"], 
-                            data["category"],
-                            data["author"], 
-                            data["publisher"], 
-                            data["year"],
-                            data["price"], 
-                            data["quantity"]
-                        ))
-                    success_count += 1
-
-
-            conn.commit()
             messagebox.showinfo(
-                "批量导入完成",
-                # f"成功处理 {success_count}/{total_count} 条记录\n"
-                # f"失败记录：{total_count - success_count}"
+                "完成",
+                f"批量导入完成！成功处理{success_count}/{total_count}条记录。"
             )
 
         except FileNotFoundError:
@@ -756,10 +790,6 @@ class LibraryManagementSystem:
             messagebox.showerror("权限错误", "没有权限读取文件")
         except UnicodeDecodeError:
             messagebox.showerror("编码错误", "文件编码不正确，请使用UTF-8编码")
-        except mysql.connector.Error as err:
-            messagebox.showerror("数据库错误", f"操作失败: {err}\n错误发生在第{line_num}行")
-            if conn:
-                conn.rollback()
         except Exception as e:
             messagebox.showerror("意外错误", f"发生未预期的错误: {str(e)}")
             if conn:
@@ -768,7 +798,6 @@ class LibraryManagementSystem:
             if conn and conn.is_connected():
                 cursor.close()
                 conn.close()
-
             self.refresh_book_list()
                 
 
