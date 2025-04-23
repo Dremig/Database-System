@@ -554,10 +554,6 @@ class LibraryManagementSystem:
         data = {}
         errors = []
 
-        all_book_no = []
-        all_book_names = []
-        
-        
         for field, label in required_fields.items():
             value = self.entries[field].get().strip()
             if not value:
@@ -572,69 +568,78 @@ class LibraryManagementSystem:
             data["year"] = int(data["year"])
             data["price"] = float(data["price"])
             data["quantity"] = int(data["quantity"])
+            
+            if data["year"] < 1800 or data["year"] > 2025:
+                raise ValueError("年份必须在1800到2025之间")
+            if data["price"] <= 0:
+                raise ValueError("价格必须大于0")
+            if data["quantity"] <= 0:
+                raise ValueError("入库数量必须大于0")
+                
         except ValueError as e:
-            messagebox.showerror("格式错误", f"数值字段输入无效：{str(e)}")
+            messagebox.showerror("格式错误", str(e))
             return
-        
-        if data["year"] < 1800 or data["year"] > 2025:
-            messagebox.showerror("年份错误", "年份必须在1800到2025之间")
-            return
-        elif data["price"] <= 0 :
-            messagebox.showerror("价格错误", "价格不得低于或等于0")
-            return
-        elif data["quantity"] <= 0:
-            messagebox.showerror("数量错误", "数量不得低于或等于0")
-            return
-        
 
-    
 
         conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                
-                cursor.execute("SELECT * FROM Books WHERE BookNo = %s", (data["book_no"],))
-                existing_book_no = cursor.fetchone()
-                cursor.execute("SELECT * FROM Books WHERE BookName = %s", (data["book_name"],))
-                existing_book_name = cursor.fetchone()
+        if not conn:
+            return
 
-                if existing_book_no and existing_book_name:
-                    if not data["book_name"] == existing_book_no[1] and data["book_no"] == existing_book_name[0]:
-                        messagebox.showerror("错误", "书号与书名应一一对应")
-                        return
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT BookName FROM Books WHERE BookNo = %s", (data["book_no"],))
+            existing_book_by_no = cursor.fetchone()
+            
+            cursor.execute("SELECT BookNo FROM Books WHERE BookName = %s", (data["book_name"],))
+            existing_book_by_name = cursor.fetchone()
 
-                if existing_book_no and existing_book_name:                     
-                    # refresh the number
-                    new_storage = existing_book_no[6] + data["quantity"]
-                    cursor.execute("UPDATE Books SET Storage = %s WHERE BookNo = %s", 
-                                (new_storage, data["book_no"]))
+
+            if existing_book_by_no:
+                if existing_book_by_no[0] != data["book_name"]:
+                    messagebox.showerror("错误", "书号与书名应一一对应")
+                    return
+            elif existing_book_by_name:
+                if existing_book_by_name[0] != data["book_no"]:
+                    messagebox.showerror("错误", "书号与书名应一一对应")
+                    return
+
+            if existing_book_by_no:
+                cursor.execute("""
+                    UPDATE Books 
+                    SET Storage = Storage + %s 
+                    WHERE BookNo = %s
+                """, (data["quantity"], data["book_no"]))
+            else:
+                cursor.execute("""
+                    INSERT INTO Books 
+                    (BookNo, BookName, BookType, Author, Publisher, Year, Price, Storage)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    data["book_no"], data["book_name"], data["category"],
+                    data["author"], data["publisher"], data["year"],
+                    data["price"], data["quantity"]
+                ))
+
+            conn.commit()
+            messagebox.showinfo("成功", "操作已完成")
+            self.refresh_book_list()
+            self.clear_entries()
+
+        except mysql.connector.Error as err:
+            if "Duplicate entry" in str(err):
+                if "BookNo" in str(err):
+                    messagebox.showerror("错误", "书号与书名应一一对应")
+                elif "BookName" in str(err):
+                    messagebox.showerror("错误", "书号与书名应一一对应")
                 else:
-                    cursor.execute("""
-                        INSERT INTO Books 
-                        (BookNo, BookName, BookType, Author, Publisher, Year, Price, Storage)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        data["book_no"], data["book_name"], data["category"],
-                        data["author"], data["publisher"], data["year"],
-                        data["price"], data["quantity"]
-                    ))
-                
-                conn.commit()
-                messagebox.showinfo("成功", "图书入库操作已完成")
-                self.refresh_book_list()
-                self.clear_entries()
-                
-            except mysql.connector.Error as err:
-                if "Duplicate entry" in str(err):
-                    messagebox.showerror("错误","书名与书号应一一对应")
-                else:
-                    messagebox.showerror("数据库错误", f"操作失败: {err}")
-                return 
+                    messagebox.showerror("错误", "书号与书名应一一对应")
+            else:
+                messagebox.showerror("数据库错误", f"操作失败: {err}")
 
-            finally:
-                cursor.close()
-                conn.close()
+        finally:
+            if 'cursor' in locals(): cursor.close()
+            conn.close()
 
     def batch_book_from_path(self):
         
