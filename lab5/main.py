@@ -730,36 +730,40 @@ class LibraryManagementSystem:
                         return
 
                     try:
-                        cursor.execute("SELECT * FROM Books WHERE BookNo = %s", (data["book_no"],))
-                        existing_book_no = cursor.fetchone()
-                        cursor.execute("SELECT * FROM Books WHERE BookName = %s", (data["book_name"],))
-                        existing_book_name = cursor.fetchone()
+                        cursor.execute("SELECT BookName FROM Books WHERE BookNo = %s", (data["book_no"],))
+                        existing_book_by_no = cursor.fetchone()
+                        
+                        cursor.execute("SELECT BookNo FROM Books WHERE BookName = %s", (data["book_name"],))
+                        existing_book_by_name = cursor.fetchone()
 
-                        if (existing_book_no and existing_book_no[1] != data["book_name"]) or (existing_book_name and existing_book_name[0] != data["book_no"]):
-                            messagebox.showerror(
-                                "错误",
-                                "书号与书名应一一对应"
-                            )
-                            conn.rollback()
-                            return
 
-                        if existing_book_no:
-                            new_storage = existing_book_no[7] + data["quantity"]  
-                            cursor.execute(
-                                "UPDATE Books SET Storage = %s WHERE BookNo = %s",
-                                (new_storage, data["book_no"])
-                            )
+                        if existing_book_by_no:
+                            if existing_book_by_no[0] != data["book_name"]:
+                                messagebox.showerror("错误", "书号与书名应一一对应")
+                                success_count-=1
+                                return 
+                        elif existing_book_by_name:
+                            if existing_book_by_name[0] != data["book_no"]:
+                                messagebox.showerror("错误", "书号与书名应一一对应")
+                                success_count-=1
+                                return 
+
+                        if existing_book_by_no:
+                            cursor.execute("""
+                                UPDATE Books 
+                                SET Storage = Storage + %s 
+                                WHERE BookNo = %s
+                            """, (data["quantity"], data["book_no"]))
                         else:
-                            cursor.execute(
-                                """INSERT INTO Books 
+                            cursor.execute("""
+                                INSERT INTO Books 
                                 (BookNo, BookName, BookType, Author, Publisher, Year, Price, Storage)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                                (
-                                    data["book_no"], data["book_name"], data["category"],
-                                    data["author"], data["publisher"], data["year"],
-                                    data["price"], data["quantity"]
-                                )
-                            )
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                data["book_no"], data["book_name"], data["category"],
+                                data["author"], data["publisher"], data["year"],
+                                data["price"], data["quantity"]
+                            ))
                         conn.commit()
                         success_count += 1
 
